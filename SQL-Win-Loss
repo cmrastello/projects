@@ -1,0 +1,257 @@
+SET ARITHABORT OFF 
+SET ANSI_WARNINGS OFF
+
+Select	
+	Opp.Case_Safe_ID__c,
+	Account.Upserve_HQ_Plan__c,
+	isnull(Quote.SBQQ__SubscriptionTerm__c,1) as Contract_Term,
+	Opp.Name,
+	RecordType.Name as Record_Type,
+	Opp.Sales_Team__c,
+	dbo.Opp.StageName,
+	Opp.Order_Type__c,
+	Opp.of_Competitors__c as Competitor_Count,
+	isnull(Opp.LeadSource,'N/A') as LeadSource,
+	isnull(Opp.Lead_Source_Detail__c,'N/A') as LeadSourceDetail,
+		dbo.UserName.Name as Rep,
+		CASE WHEN UserName.Name IN('Abbey Roberts' ,'Lindsey Kut','Patrick Reilly','Brendan Hughes') AND (dbo.Opp.CloseDate>='01-01-2018') THEN 'AM'
+		WHEN UserName.Name IN('Katherine Kazarian') AND (dbo.Opp.CloseDate>='12-15-2018') THEN 'AM'
+		WHEN UserName.Name IN('JR St Louis','Shamus Higginbottom','Jarred Young','Kayleigh Millin','Paul D''Angelo','Ralph Carey','Ryan McCabe') OR (UserName.Name IN('Mackenzie Miles','Allison Wigand') AND (RecordType.Name = 'Channel' OR Opp.Sales_Team__c ='Channel Sales' OR Opp.Sales_Team__c = 'CSM')) THEN 'Channel'
+		WHEN UserName.Name IN('Jeremy Goodman','Kevin Vonderheide','Suzy Jordan','Jordan Hutt','Brandon Ciampanelli','Nick Nappi','Chris Lovett','Dan McKenney','Lauren Lewis','Sam Daniel','Shaina Fainglas','Joe Gattuso','Christine Ross','Dan McKenney','Jeb Barnes','TJ Cordeiro','Evan Seideman','Michael LeGrange','Camden Crowell','Patrick Fagan','Bobby Meyer','Josh Farrales','Cesar Montesdeoca','David Omansky','Max Johns','Joe Calascibetta','Rob Carbone') OR (UserName.Name = 'Mackenzie Miles' AND RecordType.Name = 'Direct')  THEN 'Direct'
+		WHEN UserName.Name IN('Shawna Kelly', 'Alison Lacasse', 'Juan Gonzalez','Astrid Wettstein','Jennifer Aker', 'Mike Gotera','Steffen Bredahl', 'Steve Rolles','Adilson Graca','Ryan Sousa','Aryeh Landowne','Melinda Stanley','Claire Nobles','Katherine Kazarian','Allison Wigand','Abbey Roberts','Lindsey Kut','Kyle Ricci','Christian Nepacena','Kyle Ricci','Greg Bruno','Griffin Harris','Jacqui Reed','Erika Martinez','Patty Amatore','Khadi Ibrahim','Peggy Pavidis','Michael Romanski','Keri Jeannetti','Nicole Theohary','Christopher Becker') THEN 'CSM'
+		ELSE 'OTHER'
+		END AS TEAM,
+	Opp.Days_from_Opp_Creation_to_Closed__c as Days_To_Close,
+	CASE WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 2 Then '< 2 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 5 and Opp.Days_from_Opp_Creation_to_Closed__c > 2  Then '2-5 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 10 and Opp.Days_from_Opp_Creation_to_Closed__c > 5  Then '5-10 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 15 and Opp.Days_from_Opp_Creation_to_Closed__c > 10  Then '10-15 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 20 and Opp.Days_from_Opp_Creation_to_Closed__c > 15  Then '15-20 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c <= 30 and Opp.Days_from_Opp_Creation_to_Closed__c > 20  Then '20-30 Days'
+		WHEN Opp.Days_from_Opp_Creation_to_Closed__c > 30  Then '> 30 Days'
+		END AS Days_Close_Bucket,
+	Terminal_Count = (SELECT ROUND(FORMAT(isnull(Sum(QuoteLines.Output_Quantity__c),0),'N'),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductCode__c = 'Terminal 1' OR QuoteLines.SBQQ__ProductCode__c = 'Terminal 2+' OR QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' )),
+	FORMAT(isnull((Opp.Discount_Card_Present_V_MC_D__c/100),0),'P') AS FlatRate,
+	CASE WHEN Opp.Discount_Card_Present_V_MC_D__c = 0 OR Opp.Discount_Card_Present_V_MC_D__c IS NULL THEN 'IC+' ELSE 'Flat Rate' END AS Processing_Program, 
+	FORMAT(ISNULL(Opp.authorization_rate__c,0),'C') as Auth,
+
+	
+	--NEED TO FIGURE OUT FIXED COSTS--
+	PARR_Closed = (SELECT FORMAT(ISNULL(Sum(QuoteLines.Annual_Recurring_Revenue__c),0),'C') FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Payments' OR QuoteLines.Product_Category__c = 'Payments') AND QuoteLines.SBQQ__ProductCode__c != 'UPHQ-SOFT-GTWY'),
+	ARR_Closed = FORMAT((SELECT ISNULL(Sum(QuoteLines.Annual_Recurring_Revenue__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Payments' OR QuoteLines.Product_Category__c = 'Payments') AND QuoteLines.SBQQ__ProductCode__c != 'UPHQ-SOFT-GTWY')
+			+ isnull(Quote.Subscription_ARR__c,0),'C')
+			,
+	Opp.CloseDate,
+	HW_List_Price = (SELECT FORMAT(isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0),'C') FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')),
+
+	HW_Closed =  (SELECT FORMAT(isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0),'C') FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')),
+
+	HW_Discount = FORMAT((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) - (SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')),'C'),
+	HW_Pct_Disc = FORMAT(ISNULL(1-((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))/(SELECT NULLIF(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))),0),'P'),
+	SW_List_Price = FORMAT((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'),'C'),
+	FORMAT(isnull(Quote.Subscription_ARR__c,0),'C') as SaaS,
+	SW_Disc = FORMAT((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual')
+		-	(isnull(Quote.Subscription_ARR__c,0)),'C'),
+	SW_Pct_Disc = FORMAT(ISNULL(1-(isnull(Quote.Subscription_ARR__c,0)/
+					((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'))),0),'P'),
+
+	IMP_List_Price = (SELECT FORMAT(isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0),'C') FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')),
+	FORMAT(isnull(Quote.Implementation__c,0),'C') as Implementation,
+	IMP_Discount = FORMAT((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Services')) - isnull(Quote.Implementation__c,0),'C'),
+	IMP_Pct_Disc = FORMAT(ISNULL(1-(isnull(Quote.Implementation__c,0)/(SELECT NULLIF(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services'))),0),'P'),
+
+	Upfront_Closed = FORMAT((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) + isnull(Quote.Implementation__c,0),'C'),
+	
+	Upfront_List = FORMAT((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))
+			+
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')),'c'),
+
+	Upfront_Discounts = FORMAT((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) - (SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))
+			+
+				(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Services')) - isnull(Quote.Implementation__c,0),'c'),
+		
+	Upfront_PCT_Discount = 	FORMAT(ISNULL(1-(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) + isnull(Quote.Implementation__c,0))/
+					((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))
+			+
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')))),0),'P'),
+
+	TCV_No_PMTS = FORMAT(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))+isnull(Quote.Implementation__c,0)+(isnull(Quote.Subscription_ARR__c/12,0)*isnull(Quote.SBQQ__SubscriptionTerm__c,1))),'C'),
+
+	List_TCV_No_PMTS = Format(((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) +
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')) +
+
+				((((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'))/12)*isnull(Quote.SBQQ__SubscriptionTerm__c,1))),'C'),
+	
+	PCT_DISC_TCV_No_PMTS = FORMAT(ISNULL(1-(isnull(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))+isnull(Quote.Implementation__c,0)+(isnull(Quote.Subscription_ARR__c/12,0)*isnull(Quote.SBQQ__SubscriptionTerm__c,1))),0)/
+					((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) +
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')) +
+
+				((((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'))/12)*isnull(Quote.SBQQ__SubscriptionTerm__c,1)))),0),'p'),
+
+	TCV_PMTS_50_PCT = FORMAT(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))+isnull(Quote.Implementation__c,0)+((SELECT ISNULL(Sum((QuoteLines.Annual_Recurring_Revenue__c/12/2)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Payments' OR QuoteLines.Product_Category__c = 'Payments') AND QuoteLines.SBQQ__ProductCode__c != 'UPHQ-SOFT-GTWY')*isnull(Quote.SBQQ__SubscriptionTerm__c,1))+(isnull(Quote.Subscription_ARR__c/12,0)*isnull(Quote.SBQQ__SubscriptionTerm__c,1))),'C'),
+	
+	ARR_No_PMTS = FORMAT(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))+isnull(Quote.Implementation__c,0)+isnull(Quote.Subscription_ARR__c,0)),'C'),
+
+	List_ARR_No_PMTS = Format(((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) +
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')) +
+
+				(((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual')))),'C'),
+	
+	PCT_DISC_ARR_No_PMTS = FORMAT(ISNULL(1-(isnull(((SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))+isnull(Quote.Implementation__c,0)+(isnull(Quote.Subscription_ARR__c,0))),0)/
+					((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) +
+			(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services')) +
+
+				(((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'))))),0),'p'),
+
+HW_Margin_Impact = FORMAT((((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))*-.80)+(SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))),'C'),
+Imp_Margin_Impact = FORMAT((((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Services'))*-.40)+isnull(Quote.Implementation__c,0)),'C'),
+SW_Margin_Impact = FORMAT((((((SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c = 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+			+
+			(SELECT isnull(Sum((SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12))*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__ProductCode__c != 'POS-SOFT-LIC' AND (QuoteLines.SBQQ__BillingFrequency__c != 'Annual' OR QuoteLines.SBQQ__BillingFrequency__c IS NULL ))
+		+			(SELECT isnull(Sum(SBQQ__RegularPrice__c/(QuoteLines.SBQQ__ProrateMultiplier__c/12)),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Software' OR QuoteLines.Product_Category__c = 'Software' ) AND QuoteLines.SBQQ__BillingFrequency__c = 'Annual'))*-.27))+isnull(Quote.Subscription_ARR__c,0)),'C'),
+PaybackPeriod = FORMAT(ISNULL(((SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Hardware')) - (SELECT isnull(Sum(QuoteLines.Sale_Unit_Price__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND
+			(QuoteLines.SBQQ__ProductFamily__c = 'Hardware'))
+			+
+				(SELECT isnull(Sum(QuoteLines.SBQQ__ListPrice__c*QuoteLines.Output_Quantity__c),0) FROM QuoteLines WHERE (Quote.Id = QuoteLines.SBQQ__Quote__c) AND 
+		(QuoteLines.SBQQ__ProductFamily__c = 'Services')) - isnull(Quote.Implementation__c,0))/(isnull(Quote.Subscription_ARR__c,0)/12),100000000),'N')
+FROM
+	dbo.Account
+	LEFT JOIN dbo.Opp ON dbo.Account.Id = dbo.Opp.AccountId
+	LEFT JOIN dbo.UserName ON dbo.Opp.OwnerID = dbo.UserName.Id
+	LEFT JOIN dbo.RecordType ON dbo.Opp.RecordTypeId = dbo.RecordType.Id
+	LEFT JOIN dbo.Quote on dbo.Quote.SBQQ__Opportunity2__c = dbo.Opp.Id
+	LEFT JOIN dbo.QuoteLines ON Quote.Id = QuoteLines.SBQQ__Quote__c
+WHERE
+	Opp.CloseDate >= '12-01-2018' 
+	AND Opp.CloseDate <= '12-31-2018'
+	AND quote.SBQQ__Primary__c = 1
+	AND (Opp.StageName = 'Closed Won' OR Opp.StageName = 'Closed Lost')
+	AND Opp.Order_Type__c != 'Decommission'
+	AND Opp.Order_Type__c != 'Change of Ownership'
+	AND Opp.Order_Type__c != 'Price Concession'
+	AND Opp.Sales_Team__c != 'CSM'
+GROUP BY
+Account.Upserve_HQ_Plan__c,
+Opp.Case_Safe_ID__c,
+	dbo.UserName.Name, 
+	dbo.RecordType.Name,
+	Opp.name, 
+	Opp.CloseDate,
+	dbo.quote.Subscription_ARR__c,
+	dbo.quote.Contract_of_Terminals__c,
+	dbo.opp.StageName,
+	Order_Type__c,
+	Opp.Discount_Card_Present_V_MC_D__c,
+	dbo.Opp.Recurring_Amount__c,
+	Quote.Hardware_List_Price_Total__c,
+	Quote.Hardware__c,
+	Quote.Software_List_Price_Total__c,
+	Quote.Software_Total__c,
+	Quote.Implementation_List_Price_Total__c,
+	Quote.Implementation__c,
+	Opp.Days_from_Opp_Creation_to_Closed__c,
+	Opp.authorization_rate__c,
+	Opp.of_Competitors__c,
+	Opp.Primary_Competitor__c,
+	Opp.LeadSource,
+	Opp.Lead_Source_Detail__c,
+	Opp.Sales_Team__c,
+	Quote.Id,
+	dbo.Quote.Visa_MC_Disc_ARR__c,
+	dbo.quote.Amex_ARR__c,
+	dbo.quote.Payments_Annual_Fixed__c,
+	opp.POS_Subscription_ARR_Quote__c,
+	Quote.SBQQ__SubscriptionTerm__c,
+	opp.HQ_Subscription_ARR_Quote__c
+ORDER BY 
+dbo.Opp.CloseDate DESC,
+TEAM DESC,
+Terminal_Count DESC,
+	UserName.Name
+
+SET ARITHABORT OFF 
+SET ANSI_WARNINGS OFF
